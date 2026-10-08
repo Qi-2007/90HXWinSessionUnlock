@@ -19,11 +19,34 @@ namespace CMP90HX
         internal bool StagedReady { get { return unlockStage==12 && unlockStatus==0 && (unlockFlags&0x601)==0x601 && (unlockFlags&0x24)==0; } }
         internal bool UnlockFinished { get { return unlockStage==12 || (unlockStage>=2 && unlockStatus!=0 && unlockStatus!=0x103); } }
         byte[] pciBaseline;
-        internal FilterDiagnostics()
+        internal FilterDiagnostics(bool session=false)
         {
-            handle=Native.CreateFile(@"\\.\CMP90HXLowerFilter",0xc0000000,0,IntPtr.Zero,3,0,IntPtr.Zero);
+            handle=Native.CreateFile(session?@"\\.\CMP90HXUnlockSession":@"\\.\CMP90HXLowerFilter",0xc0000000,0,IntPtr.Zero,3,0,IntPtr.Zero);
             if(handle.IsInvalid) { int error=Marshal.GetLastWin32Error(); Dispose();
-                throw Native.Failure(error,"Open CMP90HXLowerFilter: require administrator, installed Extension INF and matching worker; reboot after updating SYS"); }
+                throw Native.Failure(error,session?"Open CMP90HXUnlockSession: require administrator, temporary driver Code 0 and matching worker; reboot after SYS update":"Open CMP90HXLowerFilter: require administrator, installed Extension INF and matching worker; reboot after updating SYS"); }
+        }
+        internal bool SessionCanRestore(Action<string> log)
+        {
+            byte[] packet=new byte[32]; uint returned;
+            if(!Native.DeviceIoControl(handle,0x8337e044,new byte[0],0,packet,packet.Length,out returned,IntPtr.Zero))
+                throw Native.Failure(Marshal.GetLastWin32Error(),"Read temporary session state");
+            if(returned!=32 || BitConverter.ToUInt32(packet,0)!=1) throw new IOException("Invalid session state packet.");
+            uint busy=BitConverter.ToUInt32(packet,12),quarantine=BitConverter.ToUInt32(packet,16),retained=BitConverter.ToUInt32(packet,20),runs=BitConverter.ToUInt32(packet,24);
+            log(String.Format("SESSION_STATE bdf=0x{0:x} started={1} busy={2} quarantine={3} retained={4} runs={5} status=0x{6:x8}",
+                BitConverter.ToUInt32(packet,4),BitConverter.ToUInt32(packet,8),busy,quarantine,retained,runs,BitConverter.ToUInt32(packet,28)));
+            if(busy!=0 || quarantine!=0 || retained!=0) return false;
+            if(runs==0) return true; // no DMA transaction in this driver lifetime (including after reboot)
+            ReadUnlock(log,true);
+            return (unlockFlags&0x800)!=0 && UnlockFinished && ((unlockFlags&0x26)==0 || StagedReady);
+        }
+        internal bool RunSession(uint bdf,Action<string> log)
+        {
+            uint returned;
+            bool result=Native.DeviceIoControl(handle,0x8337e040,BitConverter.GetBytes(bdf),4,new byte[0],0,out returned,IntPtr.Zero);
+            int error=result?0:Marshal.GetLastWin32Error();
+            log("SESSION_IOCTL_RETURN success="+result+" Win32="+error+"; full unlock was issued after START completed");
+            ReadUnlock(log);
+            return result && StagedReady && (unlockFlags&0x800)!=0;
         }
         internal void Read(Action<string> log,bool changesOnly=false)
         {
@@ -139,7 +162,8 @@ namespace CMP90HX
                     BitConverter.ToUInt32(packet,48),BitConverter.ToUInt64(packet,32),BitConverter.ToUInt64(packet,40),BitConverter.ToUInt32(packet,52),BitConverter.ToUInt32(packet,56)));
                 unlockStage=stage;unlockStatus=status;
                 if((flags&32)!=0) log("FILTER_DMA_BOOT_LIFETIME: arena/adapter/PDO retained; live=0 does not mean backing memory released; next probe/unlock requires reboot.");
-                if((flags&512)!=0) log("FILTER_RESULT_KIND=pnp-staged-unlock; DMA released="+((flags&1024)!=0)+"; NVIDIA handoff still requires a second unarmed device start.");
+                if((flags&2048)!=0) log("FILTER_RESULT_KIND=session-post-start-ioctl; DMA released="+((flags&1024)!=0)+"; close this handle before restoring NVIDIA binding.");
+                else if((flags&512)!=0) log("FILTER_RESULT_KIND=pnp-staged-unlock; DMA released="+((flags&1024)!=0)+"; NVIDIA handoff still requires a second unarmed device start.");
                 if((flags&64)!=0) log("FILTER_RESULT_KIND=single-sbr-no-firmware; success only means SBR readiness passed, not full unlock or NVIDIA recovery.");
                 if((flags&256)!=0) log("FILTER_RESULT_KIND=pnp-start-bus-function-reset; success means bus reset completion and PCI preservation passed, not unlock or verified NVIDIA initialization; next arm requires reboot after submission.");
                 else if((flags&128)!=0) log("FILTER_RESULT_KIND=pnp-start-read-only; success means PCI evidence captured, not unlock or verified NVIDIA initialization.");

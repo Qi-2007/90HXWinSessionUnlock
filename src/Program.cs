@@ -45,7 +45,18 @@ namespace CMP90HX {
                     }
                     return 0;
                 }
-                throw new ArgumentException("This standalone worker supports only filter commands. Use help.");
+                if(command=="session-unlock" || command=="session-restore" || command=="session-status" || command=="session-run-worker") {
+                    if(!options.ContainsKey("bdf")) throw new ArgumentException(command+" requires --bdf.");
+                    uint bdf=ParseBdf(options["bdf"]);
+                    if(command=="session-run-worker") return SessionWorkflow.RunWorker(bdf,Log);
+                    if(command=="session-restore") return SessionWorkflow.Recover(bdf,Log);
+                    if(command=="session-status" || command=="session-run-worker") { using(var session=new FilterDiagnostics(true)) { session.SessionCanRestore(Log); session.ReadUnlock(Log); } return 0; }
+                    int observe=180;
+                    if(options.ContainsKey("observe-seconds") && (!Int32.TryParse(options["observe-seconds"],out observe) || observe<0 || observe>300 || observe%5!=0))
+                        throw new ArgumentException("--observe-seconds must be 0..300, multiples of 5.");
+                    return SessionWorkflow.Run(bdf,options.ContainsKey("session-inf")?options["session-inf"]:Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMP90HXUnlockSession.inf"),Log,observe);
+                }
+                throw new ArgumentException("This standalone worker supports only filter/session commands. Use help.");
             } catch(Exception error) { Log("FATAL: "+error); return 1; }
             finally { if(logFile!=null) logFile.Dispose(); }
         }
@@ -72,7 +83,10 @@ namespace CMP90HX {
             if (colon < 0 || dot < colon) throw new FormatException("BDF must look like 01:00.0 or 0000:01:00.0");
             string busText = value.Substring(0, colon);
             int prior = busText.LastIndexOf(':');
-            if (prior >= 0) busText = busText.Substring(prior + 1);
+            if (prior >= 0) {
+                if(Convert.ToUInt32(busText.Substring(0,prior),16)!=0) throw new FormatException("Only PCI segment 0 is supported.");
+                busText = busText.Substring(prior + 1);
+            }
             uint bus = Convert.ToUInt32(busText, 16);
             uint dev = Convert.ToUInt32(value.Substring(colon + 1, dot - colon - 1), 16);
             uint fn = Convert.ToUInt32(value.Substring(dot + 1), 16);
@@ -85,7 +99,10 @@ namespace CMP90HX {
             Console.WriteLine(line); if(logFile!=null) logFile.WriteLine(line);
         }
         static void Usage() {
-            Console.WriteLine("CMP90HX standalone Lower Filter unlock worker 0.5.6");
+            Console.WriteLine("CMP90HX standalone Filter/session unlock worker 0.6.2");
+            Console.WriteLine("  CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 [--session-inf FILE] [--observe-seconds 180] [--log FILE] (temporary function driver; post-START IOCTL; restore original NVIDIA INF)");
+            Console.WriteLine("  CMP90HXUnlocker.exe session-restore --bdf 02:00.0 [--log FILE] (resume saved NVIDIA recovery after safe DMA gate or reboot)");
+            Console.WriteLine("  CMP90HXUnlocker.exe session-status --bdf 02:00.0 [--log FILE] (query temporary driver, no unlock)");
             Console.WriteLine("  CMP90HXUnlocker.exe filter-status [--log FILE] (transparent Lower Filter power/PnP trace)");
             Console.WriteLine("  CMP90HXUnlocker.exe filter-watch [--seconds 600] [--log FILE] (records sleep/resume, never unlocks)");
             Console.WriteLine("  CMP90HXUnlocker.exe filter-resume-probe --bdf 02:00.0 [--seconds 600] [--log FILE] (one-shot kernel D0 register/common-buffer probe, no GPU DMA/unlock)");

@@ -13,7 +13,7 @@
  * mode 7 stages full unlock, releases DMA, then fails first START for handoff.
  * No mode waits for user-mode during power completion. */
 typedef struct _FILTER_EXTENSION {
-    PDEVICE_OBJECT Lower, Pdo;
+    PDEVICE_OBJECT Lower, Pdo, Self;
     IO_REMOVE_LOCK RemoveLock;
     ULONG Bdf;
     BOOLEAN Started;
@@ -23,6 +23,10 @@ typedef struct _FILTER_EXTENSION {
     ULONG InterruptCount, InterruptFlags;
 } FILTER_EXTENSION;
 static PDEVICE_OBJECT ControlDevice;
+#ifdef CMP_UNLOCK_SESSION
+static PDEVICE_OBJECT SessionDevice;
+static ULONG SessionRuns;
+#endif
 static FAST_MUTEX OwnerLock;
 static PFILE_OBJECT Owner;
 static PEPROCESS OwnerProcess;
@@ -176,9 +180,15 @@ static VOID ResumeWorker(PDEVICE_OBJECT device, PVOID context)
     KeQuerySystemTime(&now); result.Time = (ULONGLONG)now.QuadPart;
     begin = KeQueryInterruptTime();
     result.Irql = KeGetCurrentIrql();
-    Record(ext, 5, work->Mode >= 5 ? IRP_MJ_PNP : IRP_MJ_POWER,
+    Record(ext, 5, work->Mode == 8 ? IRP_MJ_DEVICE_CONTROL : work->Mode >= 5 ? IRP_MJ_PNP : IRP_MJ_POWER,
         work->Mode >= 5 ? IRP_MN_START_DEVICE : IRP_MN_SET_POWER, STATUS_PENDING, work->Mode >= 5 ? 0 : 0x10001);
-    if (work->Mode == 7) {
+    if (work->Mode == 8) {
+        /* Control IOCTL only: START has already completed. */
+        result.Stage = 14; result.Status = (ULONG)ResumeUnlock(ext, FALSE, TRUE);
+        irp->IoStatus.Status = (NTSTATUS)result.Status;
+        irp->IoStatus.Information = 0;
+        if (GpuQuarantined) result.Flags |= 0x400;
+    } else if (work->Mode == 7) {
         result.Stage = 14; result.Status = (ULONG)ResumeUnlock(ext, FALSE, TRUE);
         if (GpuQuarantined) result.Flags |= 0x400;
         /* Expected first Code 10: never resume NVIDIA on SBR-cleared MSI.
@@ -211,7 +221,7 @@ static VOID ResumeWorker(PDEVICE_OBJECT device, PVOID context)
     }
     result.ElapsedMs = (ULONG)((KeQueryInterruptTime() - begin) / 10000);
     KeAcquireSpinLock(&TraceLock, &old); ProbeResult = result; KeReleaseSpinLock(&TraceLock, old);
-    Record(ext, 6, work->Mode >= 5 ? IRP_MJ_PNP : IRP_MJ_POWER,
+    Record(ext, 6, work->Mode == 8 ? IRP_MJ_DEVICE_CONTROL : work->Mode >= 5 ? IRP_MJ_PNP : IRP_MJ_POWER,
         work->Mode >= 5 ? IRP_MN_START_DEVICE : IRP_MN_SET_POWER, (NTSTATUS)result.Status, work->Mode >= 5 ? 0 : 0x10001);
     InterlockedExchange(&ProbeBusy, 0);
     IoFreeWorkItem(work->Item); ExFreePoolWithTag(work, 'pPMC');
@@ -250,6 +260,10 @@ static NTSTATUS ForwardComplete(PDEVICE_OBJECT device, PIRP irp, PVOID context)
         if (stack->MajorFunction == IRP_MJ_PNP) {
             if (stack->MinorFunction == IRP_MN_START_DEVICE) {
                 ext->Started = TRUE;
+#ifdef CMP_UNLOCK_SESSION
+                ext->Power = PowerDeviceD0;
+                { POWER_STATE state; state.DeviceState = PowerDeviceD0; PoSetPowerState(ext->Self, DevicePowerState, state); }
+#endif
                 if (ext->Bdf == StagedBdf && StagedPending) {
                     InterlockedExchange(&StagedPending, 0);
                     CoreLog(NULL, "FILTER_PNP_HANDOFF_LOWER_START: transparent second START, NVIDIA initialization continues above\n");
@@ -259,8 +273,12 @@ static NTSTATUS ForwardComplete(PDEVICE_OBJECT device, PIRP irp, PVOID context)
                 stack->MinorFunction == IRP_MN_SURPRISE_REMOVAL) ext->Started = FALSE;
         }
         if (stack->MajorFunction == IRP_MJ_POWER && stack->MinorFunction == IRP_MN_SET_POWER &&
-            stack->Parameters.Power.Type == DevicePowerState)
+            stack->Parameters.Power.Type == DevicePowerState) {
             ext->Power = stack->Parameters.Power.State.DeviceState;
+#ifdef CMP_UNLOCK_SESSION
+            PoSetPowerState(ext->Self, DevicePowerState, stack->Parameters.Power.State);
+#endif
+        }
     }
     if (stack->MajorFunction == IRP_MJ_POWER || stack->MajorFunction == IRP_MJ_PNP)
         Record(ext, 3, stack->MajorFunction, stack->MinorFunction, irp->IoStatus.Status, PowerValue(stack));
@@ -274,6 +292,43 @@ static NTSTATUS DispatchStack(PDEVICE_OBJECT device, PIRP irp)
     PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(irp);
     NTSTATUS status = IoAcquireRemoveLock(&ext->RemoveLock, irp);
     if (!NT_SUCCESS(status)) return Complete(irp, status, 0);
+#ifdef CMP_UNLOCK_SESSION
+    /* This build owns the function-driver role. It never unlocks in PnP/power. */
+    if (stack->MajorFunction == IRP_MJ_PNP) {
+        switch (stack->MinorFunction) {
+        case IRP_MN_START_DEVICE:
+            irp->IoStatus.Status = STATUS_SUCCESS; break;
+        case IRP_MN_QUERY_STOP_DEVICE:
+        case IRP_MN_QUERY_REMOVE_DEVICE:
+            if (ProbeBusy || GpuQuarantined || RetainedCore) {
+                IoReleaseRemoveLock(&ext->RemoveLock, irp);
+                return Complete(irp, STATUS_DEVICE_BUSY, 0);
+            }
+            irp->IoStatus.Status = STATUS_SUCCESS; break;
+        case IRP_MN_CANCEL_STOP_DEVICE:
+        case IRP_MN_CANCEL_REMOVE_DEVICE:
+        case IRP_MN_STOP_DEVICE:
+        case IRP_MN_SURPRISE_REMOVAL:
+        case IRP_MN_REMOVE_DEVICE:
+            irp->IoStatus.Status = STATUS_SUCCESS; break;
+        case IRP_MN_DEVICE_USAGE_NOTIFICATION:
+            if (stack->Parameters.UsageNotification.InPath) {
+                IoReleaseRemoveLock(&ext->RemoveLock, irp);
+                return Complete(irp, STATUS_NOT_SUPPORTED, 0);
+            }
+            irp->IoStatus.Status = STATUS_SUCCESS; break;
+        default: break;
+        }
+    }
+    if (stack->MajorFunction == IRP_MJ_POWER &&
+        (stack->MinorFunction == IRP_MN_SET_POWER || stack->MinorFunction == IRP_MN_QUERY_POWER)) {
+        if (ProbeBusy || GpuQuarantined || RetainedCore) {
+            PoStartNextPowerIrp(irp); IoReleaseRemoveLock(&ext->RemoveLock, irp);
+            return Complete(irp, STATUS_DEVICE_BUSY, 0);
+        }
+        irp->IoStatus.Status = STATUS_SUCCESS;
+    }
+#endif
     if (stack->MajorFunction == IRP_MJ_PNP && stack->MinorFunction == IRP_MN_START_DEVICE)
         CacheResources(ext, stack->Parameters.StartDevice.AllocatedResourcesTranslated);
     if (stack->MajorFunction == IRP_MJ_POWER || stack->MajorFunction == IRP_MJ_PNP)
@@ -283,6 +338,9 @@ static NTSTATUS DispatchStack(PDEVICE_OBJECT device, PIRP irp)
         ext->Started = FALSE;
         Record(ext, 4, IRP_MJ_PNP, IRP_MN_REMOVE_DEVICE, STATUS_SUCCESS, 0);
         KeAcquireSpinLock(&TraceLock, &old); if (DeviceCount) --DeviceCount;
+#ifdef CMP_UNLOCK_SESSION
+        if (SessionDevice == device) SessionDevice = NULL;
+#endif
         KeReleaseSpinLock(&TraceLock, old);
         IoReleaseRemoveLockAndWait(&ext->RemoveLock, irp);
         IoSkipCurrentIrpStackLocation(irp); status = IoCallDriver(lower, irp);
@@ -360,6 +418,60 @@ NTSTATUS FilterDispatch(PDEVICE_OBJECT device, PIRP irp)
             IoGetRequestorProcess(irp) != OwnerProcess || irp->RequestorMode != UserMode) {
             status = STATUS_ACCESS_DENIED; break;
         }
+#ifdef CMP_UNLOCK_SESSION
+        if (stack->Parameters.DeviceIoControl.IoControlCode == CMP_SESSION_STATUS) {
+            CMP_SESSION_INFO *info; KIRQL old;
+            if (stack->Parameters.DeviceIoControl.InputBufferLength ||
+                stack->Parameters.DeviceIoControl.OutputBufferLength != sizeof(*info)) { status = STATUS_INFO_LENGTH_MISMATCH; break; }
+            info = (CMP_SESSION_INFO *)irp->AssociatedIrp.SystemBuffer;
+            KeAcquireSpinLock(&TraceLock, &old);
+            info->Version = 1; info->Bdf = LastBdf; info->Started = Ready;
+            info->Busy = (ULONG)ProbeBusy; info->Quarantined = (ULONG)GpuQuarantined;
+            info->Retained = RetainedCore != NULL; info->Runs = SessionRuns;
+            info->Status = UnlockResult.Status;
+            KeReleaseSpinLock(&TraceLock, old);
+            status = STATUS_SUCCESS; bytes = sizeof(*info); break;
+        }
+        if (stack->Parameters.DeviceIoControl.IoControlCode == CMP_SESSION_RUN) {
+            ULONG target; KIRQL old; FILTER_EXTENSION *ext; RESUME_WORK *work; PDEVICE_OBJECT sessionDevice;
+            if (stack->Parameters.DeviceIoControl.InputBufferLength != sizeof(ULONG) ||
+                stack->Parameters.DeviceIoControl.OutputBufferLength) { status = STATUS_INFO_LENGTH_MISMATCH; break; }
+            target = *(ULONG *)irp->AssociatedIrp.SystemBuffer;
+            KeAcquireSpinLock(&TraceLock, &old);
+            if (!SessionDevice || DeviceCount != 1 || target > 0xffff || target != LastBdf || !Ready || ProbeBusy ||
+                GpuQuarantined || RetainedCore) {
+                KeReleaseSpinLock(&TraceLock, old); status = STATUS_INVALID_DEVICE_STATE; break;
+            }
+            sessionDevice = SessionDevice;
+            ext = (FILTER_EXTENSION *)sessionDevice->DeviceExtension;
+            if (ext->Power != PowerDeviceD0) { KeReleaseSpinLock(&TraceLock, old); status = STATUS_DEVICE_NOT_READY; break; }
+            status = IoAcquireRemoveLock(&ext->RemoveLock, irp);
+            if (!NT_SUCCESS(status)) { KeReleaseSpinLock(&TraceLock, old); break; }
+            ProbeBusy = 1;
+            KeReleaseSpinLock(&TraceLock, old);
+            work = ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(*work), 'pPMC');
+            if (work) work->Item = IoAllocateWorkItem(sessionDevice);
+            if (!work || !work->Item) {
+                if (work) ExFreePoolWithTag(work, 'pPMC');
+                InterlockedExchange(&ProbeBusy, 0); IoReleaseRemoveLock(&ext->RemoveLock, irp);
+                status = STATUS_INSUFFICIENT_RESOURCES; break;
+            }
+            work->Ext = ext; work->Irp = irp; work->Mode = 8;
+            KeAcquireSpinLock(&TraceLock, &old);
+            ++SessionRuns; RtlZeroMemory(&UnlockResult, sizeof(UnlockResult));
+            UnlockResult.Version = 1; UnlockResult.Stage = 1; UnlockResult.Bdf = target;
+            UnlockResult.Status = (ULONG)STATUS_PENDING; UnlockResult.Flags = 2048;
+            KeReleaseSpinLock(&TraceLock, old);
+            IoMarkIrpPending(irp);
+            /* FAST_MUTEX raises to APC_LEVEL. Release it BEFORE queueing PASSIVE work. */
+            ExReleaseFastMutex(&OwnerLock);
+            IoQueueWorkItem(work->Item, ResumeWorker, DelayedWorkQueue, work);
+            return STATUS_PENDING;
+        }
+        if (stack->Parameters.DeviceIoControl.IoControlCode == CMP_FILTER_ARM_PROBE) {
+            status = STATUS_INVALID_DEVICE_REQUEST; break;
+        }
+#endif
         if (stack->Parameters.DeviceIoControl.IoControlCode == CMP_FILTER_ARM_PROBE) {
             KIRQL old; LARGE_INTEGER now; ULONG target, mode = 0;
             if ((stack->Parameters.DeviceIoControl.InputBufferLength != sizeof(ULONG) &&
@@ -439,7 +551,7 @@ NTSTATUS FilterAddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo)
     status = IoCreateDevice(driver, sizeof(FILTER_EXTENSION), NULL, FILE_DEVICE_UNKNOWN, 0, FALSE, &device);
     if (!NT_SUCCESS(status)) return status;
     ext = (FILTER_EXTENSION *)device->DeviceExtension;
-    ext->Pdo = pdo; ObReferenceObject(pdo);
+    ext->Self = device; ext->Pdo = pdo; ObReferenceObject(pdo);
     ext->Bdf = MAXULONG; ext->Power = PowerDeviceUnspecified;
     IoInitializeRemoveLock(&ext->RemoveLock, 'fPMC', 0, 0);
     if (NT_SUCCESS(IoGetDeviceProperty(pdo, DevicePropertyBusNumber, sizeof(bus), &bus, &size)) &&
@@ -451,13 +563,21 @@ NTSTATUS FilterAddDevice(PDRIVER_OBJECT driver, PDEVICE_OBJECT pdo)
     if (!ext->Lower) { ObDereferenceObject(pdo); IoDeleteDevice(device); return STATUS_NO_SUCH_DEVICE; }
     device->Flags |= ext->Lower->Flags & (DO_BUFFERED_IO | DO_DIRECT_IO | DO_POWER_PAGABLE | DO_POWER_INRUSH);
     KeAcquireSpinLock(&TraceLock, &old); ++DeviceCount; KeReleaseSpinLock(&TraceLock, old);
+#ifdef CMP_UNLOCK_SESSION
+    KeAcquireSpinLock(&TraceLock, &old); SessionDevice = device; KeReleaseSpinLock(&TraceLock, old);
+#endif
     Record(ext, 1, IRP_MJ_PNP, 0, STATUS_SUCCESS, ext->Lower->Flags);
     device->Flags &= ~DO_DEVICE_INITIALIZING; return STATUS_SUCCESS;
 }
 NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registry)
 {
+#ifdef CMP_UNLOCK_SESSION
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\CMP90HXUnlockSession");
+    UNICODE_STRING link = RTL_CONSTANT_STRING(L"\\DosDevices\\CMP90HXUnlockSession");
+#else
     UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\CMP90HXLowerFilter");
     UNICODE_STRING link = RTL_CONSTANT_STRING(L"\\DosDevices\\CMP90HXLowerFilter");
+#endif
     UNICODE_STRING acl = RTL_CONSTANT_STRING(L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
     PDEVICE_OBJECT device; ULONG i; NTSTATUS status;
     UNREFERENCED_PARAMETER(registry);

@@ -1,0 +1,56 @@
+; Experimental, exclusive PCI function driver. Not a NVIDIA upper/lower filter.
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%Provider%
+DriverVer=10/08/2026,0.6.2.0
+CatalogFile=CMP90HXUnlockSession.cat
+PnpLockdown=1
+
+[Manufacturer]
+%Provider%=Devices,NTamd64.10.0...22000
+
+[Devices.NTamd64.10.0...22000]
+%Device%=Install,PCI\VEN_10DE&DEV_220D
+
+[Install.NT]
+CopyFiles=DriverCopy
+
+[Install.NT.HW]
+AddReg=DeviceDmaRemapping
+
+[DeviceDmaRemapping]
+HKR,"DMA Management","RemappingSupported",0x00010001,1
+HKR,"DMA Management","RemappingFlags",0x00010001,0
+
+[Install.NT.Services]
+AddService=CMP90HXUnlockSession,0x00000002,DriverService
+
+[DriverService]
+DisplayName=%Device%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\CMP90HXUnlockSession.sys
+AddReg=ServiceDmaRemapping
+
+[ServiceDmaRemapping]
+HKR,Parameters,DmaRemappingCompatible,0x00010001,1
+
+[DestinationDirs]
+DriverCopy=13
+
+[DriverCopy]
+CMP90HXUnlockSession.sys
+
+[SourceDisksNames]
+1=%Disk%,,,
+
+[SourceDisksFiles]
+CMP90HXUnlockSession.sys=1
+
+[Strings]
+Provider="CMP90HX Experimental"
+Device="CMP 90HX Temporary Unlock Session"
+Disk="CMP90HX temporary session driver"

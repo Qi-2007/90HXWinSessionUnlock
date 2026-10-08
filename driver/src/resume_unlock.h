@@ -1,4 +1,4 @@
-/* Source core runs synchronously at PASSIVE before D0 completion goes upward.
+﻿/* Source core runs synchronously at PASSIVE before D0 completion goes upward.
  * This does not establish a cold initialization or WDDM exclusive-access window.
  * Addresses are derived from the bound PDO/resources, never from userspace.
  * One transaction at a time; no user-mode callback, ELF loader or code injection. */
@@ -375,7 +375,13 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     ActiveCore = ctx; ctx->Deadline = begin + 120000ULL * 10000;
     ctx->Pdo = ext->Pdo; ObReferenceObject(ctx->Pdo);
     ctx->StageBegin = begin; ctx->StageNumber = 2;
-    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.5.6 budgetMs=120000 mode=%s\n", staged ? "pnp-staged-unlock" : sbrOnly ? "single-sbr-no-firmware" : "full-unlock-boot-arena");
+    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.2 budgetMs=120000 mode=%s\n",
+#ifdef CMP_UNLOCK_SESSION
+        "session-post-start-ioctl"
+#else
+        staged ? "pnp-staged-unlock" : sbrOnly ? "single-sbr-no-firmware" : "full-unlock-boot-arena"
+#endif
+    );
     status = CoreBind(ext); if (!NT_SUCCESS(status)) goto done;
     ctl = GspRead(GpuMapping, 0x100);
     i = GspRead(GpuMapping, 0x1388);
@@ -467,8 +473,16 @@ done:
         if (ctx->Buffer) ctx->Adapter->DmaOperations->FreeCommonBuffer(ctx->Adapter, CMP_ARENA_BYTES, ctx->Logical, ctx->Buffer, TRUE);
         if (ctx->Adapter) ctx->Adapter->DmaOperations->PutDmaAdapter(ctx->Adapter);
         ObDereferenceObject(ctx->Pdo); ExFreePoolWithTag(ctx, 'uUMC');
-        CoreLog(NULL, "FILTER_PNP_DMA_RELEASED: common-buffer/adapter/extra-PDO reference released before START completion; no retained arena\n");
+        CoreLog(NULL,
+#ifdef CMP_UNLOCK_SESSION
+            "SESSION_DMA_RELEASED: common-buffer/adapter/extra-PDO released before IOCTL completion; safe to close session handle and rebind NVIDIA\n"
+#else
+            "FILTER_PNP_DMA_RELEASED: common-buffer/adapter/extra-PDO reference released before START completion; no retained arena\n"
+#endif
+        );
+#ifndef CMP_UNLOCK_SESSION
         StagedBdf = ext->Bdf; InterlockedExchange(&StagedPending, 1);
+#endif
         KeAcquireSpinLock(&TraceLock, &old);
         UnlockResult.Flags = (UnlockResult.Flags & ~32u) | 1024;
         UnlockResult.Stage = 12;
