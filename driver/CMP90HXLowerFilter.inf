@@ -1,0 +1,52 @@
+; Device lower filter extension. NVIDIA remains the base/function driver.
+[Version]
+Signature="$WINDOWS NT$"
+Class=Extension
+ClassGuid={e2f84ce7-8efa-411c-aa69-97454ca4cb57}
+ExtensionId={8ea54592-c08b-4d78-a7f6-97644637fc42}
+Provider=%Provider%
+DriverVer=10/08/2026,0.5.6.0
+CatalogFile=CMP90HXLowerFilter.cat
+PnpLockdown=1
+
+[Manufacturer]
+%Provider%=Devices,NTamd64.10.0...22000
+
+[Devices.NTamd64.10.0...22000]
+%Device%=Install,PCI\VEN_10DE&DEV_220D
+
+[Install.NT]
+CopyFiles=DriverCopy
+
+[Install.NT.Services]
+AddService=CMP90HXLowerFilter,0,FilterService
+
+[Install.NT.Filters]
+AddFilter=CMP90HXLowerFilter,0,LowerFilter
+
+[LowerFilter]
+FilterPosition=Lower
+
+[FilterService]
+DisplayName=%Device%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\CMP90HXLowerFilter.sys
+
+[DestinationDirs]
+DriverCopy=13
+
+[DriverCopy]
+CMP90HXLowerFilter.sys
+
+[SourceDisksNames]
+1=%Disk%,,,
+
+[SourceDisksFiles]
+CMP90HXLowerFilter.sys=1
+
+[Strings]
+Provider="CMP90HX Experimental"
+Device="CMP 90HX Lower Filter D0 Probe"
+Disk="CMP90HX filter test driver"

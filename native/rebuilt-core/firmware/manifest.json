@@ -1,0 +1,41 @@
+{
+  "original_sha256": "b533b7b245ed606c151ca336b9a6bacebe935e3ec478246e879c668a4dd98a6a",
+  "assets": [
+    {
+      "name": "firmware_plm_image",
+      "offset": 229024,
+      "size": 24576,
+      "sha256": "3df651acb174fd5f5561a1996965b192f50c5d763168446ed0d4ead19d895768"
+    },
+    {
+      "name": "firmware_plm_signature",
+      "offset": 253600,
+      "size": 8552,
+      "sha256": "966512cef7f9ce3f4052b1bf33df7b509c97c405fdcf264df4ea2b1366c37372"
+    },
+    {
+      "name": "firmware_feature_image",
+      "offset": 266624,
+      "size": 24576,
+      "sha256": "3df651acb174fd5f5561a1996965b192f50c5d763168446ed0d4ead19d895768"
+    },
+    {
+      "name": "firmware_feature_signature",
+      "offset": 299776,
+      "size": 8552,
+      "sha256": "966512cef7f9ce3f4052b1bf33df7b509c97c405fdcf264df4ea2b1366c37372"
+    },
+    {
+      "name": "firmware_booter_image",
+      "offset": 101088,
+      "size": 60416,
+      "sha256": "6803188fef6bd352f7ab47b2cf13e18175ac3f12243fa6afae7c4e2872f246f0"
+    },
+    {
+      "name": "firmware_booter_signatures",
+      "offset": 100320,
+      "size": 768,
+      "sha256": "4db5a10949e475df7ecc011e34229895b296653cd401f6d88396ae00412cf0ea"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CMP90HXFilterUnlockProgram", "src\CMP90HXFilterUnlockProgram.csproj", "{A04E2C3D-34C4-4D56-BDE4-86D3CA4B0AFE}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "CMP90HXLowerFilter", "driver\CMP90HXLowerFilter.vcxproj", "{031B06D4-CB17-4893-A3B1-D58C35A2EBB3}"
+EndProject
+Global
+ GlobalSection(SolutionConfigurationPlatforms) = preSolution
+  Release|x64 = Release|x64
+ EndGlobalSection
+ GlobalSection(ProjectConfigurationPlatforms) = postSolution
+  {A04E2C3D-34C4-4D56-BDE4-86D3CA4B0AFE}.Release|x64.ActiveCfg = Release|x64
+  {A04E2C3D-34C4-4D56-BDE4-86D3CA4B0AFE}.Release|x64.Build.0 = Release|x64
+  {031B06D4-CB17-4893-A3B1-D58C35A2EBB3}.Release|x64.ActiveCfg = Release|x64
+  {031B06D4-CB17-4893-A3B1-D58C35A2EBB3}.Release|x64.Build.0 = Release|x64
+ EndGlobalSection
+EndGlobal

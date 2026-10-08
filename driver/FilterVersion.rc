@@ -1,0 +1,26 @@
+﻿#include <winver.h>
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,5,6,0
+PRODUCTVERSION 0,5,6,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DRV
+FILESUBTYPE 0
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904b0"
+  BEGIN
+   VALUE "FileDescription", "CMP90HX Lower Filter Unlock Driver"
+   VALUE "FileVersion", "0.5.6.0"
+   VALUE "InternalName", "CMP90HXLowerFilter"
+   VALUE "OriginalFilename", "CMP90HXLowerFilter.sys"
+   VALUE "ProductName", "CMP90HX Windows Filter Driver Unlock"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x409, 1200
+ END
+END
