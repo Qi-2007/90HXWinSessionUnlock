@@ -5,7 +5,7 @@ Class=Extension
 ClassGuid={e2f84ce7-8efa-411c-aa69-97454ca4cb57}
 ExtensionId={8ea54592-c08b-4d78-a7f6-97644637fc42}
 Provider=%Provider%
-DriverVer=10/08/2026,0.6.2.0
+DriverVer=10/08/2026,0.6.5.0
 CatalogFile=CMP90HXLowerFilter.cat
 PnpLockdown=1
 

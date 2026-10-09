@@ -50,11 +50,13 @@ namespace CMP90HX {
                     uint bdf=ParseBdf(options["bdf"]);
                     if(command=="session-run-worker") return SessionWorkflow.RunWorker(bdf,Log);
                     if(command=="session-restore") return SessionWorkflow.Recover(bdf,Log);
-                    if(command=="session-status" || command=="session-run-worker") { using(var session=new FilterDiagnostics(true)) { session.SessionCanRestore(Log); session.ReadUnlock(Log); } return 0; }
+                    if(command=="session-status") { using(var session=new FilterDiagnostics(true)) { session.SessionCanRestore(Log); session.ReadUnlock(Log); } return 0; }
                     int observe=180;
                     if(options.ContainsKey("observe-seconds") && (!Int32.TryParse(options["observe-seconds"],out observe) || observe<0 || observe>300 || observe%5!=0))
                         throw new ArgumentException("--observe-seconds must be 0..300, multiples of 5.");
-                    return SessionWorkflow.Run(bdf,options.ContainsKey("session-inf")?options["session-inf"]:Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMP90HXUnlockSession.inf"),Log,observe);
+                    string restoreMode=options.ContainsKey("restore-mode")?options["restore-mode"]:"update";
+                    if(restoreMode!="direct" && restoreMode!="update") throw new ArgumentException("--restore-mode must be direct or update.");
+                    return SessionWorkflow.Run(bdf,options.ContainsKey("session-inf")?options["session-inf"]:Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"CMP90HXUnlockSession.inf"),Log,observe,restoreMode=="direct");
                 }
                 throw new ArgumentException("This standalone worker supports only filter/session commands. Use help.");
             } catch(Exception error) { Log("FATAL: "+error); return 1; }
@@ -99,8 +101,8 @@ namespace CMP90HX {
             Console.WriteLine(line); if(logFile!=null) logFile.WriteLine(line);
         }
         static void Usage() {
-            Console.WriteLine("CMP90HX standalone Filter/session unlock worker 0.6.2");
-            Console.WriteLine("  CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 [--session-inf FILE] [--observe-seconds 180] [--log FILE] (temporary function driver; post-START IOCTL; restore original NVIDIA INF)");
+            Console.WriteLine("CMP90HX standalone Filter/session unlock worker 0.6.5");
+            Console.WriteLine("  CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 [--session-inf FILE] [--restore-mode update|direct] [--observe-seconds 180] [--log FILE] (temporary function driver; post-START IOCTL; restore original NVIDIA INF)");
             Console.WriteLine("  CMP90HXUnlocker.exe session-restore --bdf 02:00.0 [--log FILE] (resume saved NVIDIA recovery after safe DMA gate or reboot)");
             Console.WriteLine("  CMP90HXUnlocker.exe session-status --bdf 02:00.0 [--log FILE] (query temporary driver, no unlock)");
             Console.WriteLine("  CMP90HXUnlocker.exe filter-status [--log FILE] (transparent Lower Filter power/PnP trace)");

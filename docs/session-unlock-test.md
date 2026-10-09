@@ -1,4 +1,4 @@
-﻿# 0.6.2：临时功能驱动，START 完成后解锁
+﻿# 0.6.5：临时功能驱动，START 完成后解锁
 
 本轮针对0.5.5用户反馈：解锁及NVIDIA接管正常，但渲染程序在解锁期间等待。
 新路径先完成NVIDIA停用，让系统有机会处理渲染切换，然后绑定临时PCI功能驱动。
@@ -13,6 +13,14 @@
 
 0.6.2修正重启后首次绑定成功但控制设备Win32=5：进程创建通知从驱动加载时开始，父进程此前已启动。START完成后自动启动配套子进程打开控制设备并运行解锁，父进程持续持有流程锁；子进程关闭句柄、确认DMA回收后才自动恢复NVIDIA。验证摘要和恢复记录保护保持启用。正常完成无需手工session-restore。
 
+0.6.3速度实验：session重置后最小等待从250ms改为50ms，然后每20ms读取完整就绪条件；连续6次通过维持至少100ms稳定窗口，恢复预算仍约8秒。保留100ms复位断言、释放后100ms等待、全部22次SBR、固件事务和DMA回收门槛。Lower Filter保持250ms/50ms/3次策略。新增FILTER_SBR_TIMING用于比较实机耗时，未承诺加速幅度。SESSION_DEVICE_READY表示已恢复NVIDIA，其后的180秒仅为观察；确认稳定后可使用--observe-seconds 0立即退出。
+
+0.6.4恢复速度实验：禁用前通过DI_FLAGSEX_INSTALLEDDRIVER只保存当前NVIDIA驱动节点，正常解锁后使用DiInstallDevice将该节点装回精确设备实例，并设置DI_NOFILECOPY避免重复复制同一包文件。保留安装器、设备初始化及Code0检查。该实验原默认--restore-mode direct；--restore-mode update使用原UpdateDriver路径作对照。保存节点失败或直接安装返回失败时回退旧路径；要求重启则保留恢复记录。手工session-restore继续用旧路径。新增SESSION_RESTORE_DIRECT/installMs与SESSION_RESTORE_READY/elapsedMs。实际速度和兼容性待实机验证。
+
+参考：[DiInstallDevice](https://learn.microsoft.com/en-us/windows/win32/api/newdev/nf-newdev-diinstalldevice)、[安装参数](https://learn.microsoft.com/en-us/windows/win32/api/setupapi/ns-setupapi-sp_devinstall_params_w)。
+
+0.6.5恢复已验证策略：用户0.6.4实测直接安装27.863秒，比0.6.2原更新路径17.689秒慢，且没有回退。默认恢复方式改回update；direct仅作显式实验。核心实测20.578秒，原19.882秒，恢复250ms等待、50ms轮询、3次稳定样本，保留SBR计时。两个API内部都包括安装器与设备启动处理，单次日志不能断定是哪部分占主导。正常测试使用--restore-mode update。
+
 ## 签名和运行
 
 1. 运行项目根目录 `./build.ps1` 编译。构建不会加载、签名或操作显卡。
@@ -21,10 +29,10 @@
 4. 保持显卡当前为 NVIDIA Code 0。更新过已加载的session SYS，需要重启加载新版本。
 
 ```powershell
-cd E:\code\90HX\90HXWindowsUnlock\90HXWindowsFilterDriverUnlock\build\filter-driver
+cd E:\code\90HX\90HXWindowsUnlock\90HXWinSessionUnlock\build\filter-driver
 & 'H:\Windows Kits\10\bin\10.0.28000.0\x86\Inf2Cat.exe' /driver:. /os:10_GE_X64 /uselocaltime
 # 按自己的签名流程签对应CAT，然后在管理员终端执行：
-.\CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 --observe-seconds 180 --log session-unlock-062.log
+.\CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 --observe-seconds 180 --log session-unlock-065.log
 ```
 
 不要提前 `/install` session INF，否则当前NVIDIA包信息无法在命令开始前正确保存。

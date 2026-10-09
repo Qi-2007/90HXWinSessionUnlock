@@ -36,3 +36,5 @@ __pycache__/
 /evidence/
 /migration/
 *.dmp
+
+*.log

@@ -114,18 +114,25 @@ namespace CMP90HX {
             if(!result) throw Native.Failure(error,"Change exact 90HX function-driver binding");
             if(reboot) throw new IOException("Driver binding requires reboot; no unlock IOCTL will be submitted.");
         }
-        static void Restore(Recovery recovery,Action<string> log) {
+        static void Restore(Recovery recovery,Action<string> log,NvidiaRestoreBinding direct=null) {
             if(Hash(recovery.NvidiaInf)!=recovery.NvidiaHash) throw new IOException("Original NVIDIA INF changed; refusing replacement package.");
             log("SESSION_RESTORE_BEGIN exactOriginalInf="+recovery.NvidiaInf);
-            Bind(recovery,recovery.NvidiaInf,log);
+            if(Unique(recovery.Bdf)!=recovery.Instance) throw new IOException("Restore device instance changed.");
+            bool installed=direct!=null && direct.Install(log);
+            if(!installed) {
+                log("SESSION_RESTORE_UPDATE: using original package update path");
+                Bind(recovery,recovery.NvidiaInf,log);
+            }
+            var readyClock=System.Diagnostics.Stopwatch.StartNew();
             Check(CM_Enable_DevNode(Node(recovery.Instance),0),"Enable original NVIDIA device");
             Wait(recovery.Instance,"nvlddmkm",0,log);
+            log("SESSION_RESTORE_READY elapsedMs="+readyClock.ElapsedMilliseconds);
             File.Delete(RecoveryPath); log("SESSION_RESTORE_COMPLETE NVIDIA Code 0; recovery record removed");
         }
-        internal static int Run(uint bdf,string sessionInf,Action<string> log,int observeSeconds) {
+        internal static int Run(uint bdf,string sessionInf,Action<string> log,int observeSeconds,bool directRestore) {
             if(!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) throw new IOException("Administrator required.");
             using(var mutex=new Mutex(false,@"Global\CMP90HX_FullUnlock")) {
-                bool acquired=false;
+                bool acquired=false; NvidiaRestoreBinding direct=null;
                 try { try { acquired=mutex.WaitOne(0); } catch(AbandonedMutexException) { acquired=true; }
                     if(!acquired) throw new IOException("Another unlock workflow is active.");
                     if(File.Exists(RecoveryPath)) throw new IOException("Pending session recovery: run session-restore --bdf "+PciAddress.Bdf(bdf));
@@ -135,7 +142,12 @@ namespace CMP90HX {
                     sessionInf=Path.GetFullPath(sessionInf);
                     if(Path.GetFileName(sessionInf)!="CMP90HXUnlockSession.inf" || !File.ReadAllText(sessionInf).Contains("AddService=CMP90HXUnlockSession"))
                         throw new IOException("Expected the signed CMP90HXUnlockSession package INF.");
-                    Recovery recovery=Capture(id,bdf); Save(recovery,true);
+                    Recovery recovery=Capture(id,bdf);
+                    if(directRestore) {
+                        try { direct=NvidiaRestoreBinding.Capture(id,log); }
+                        catch(Exception error) { log("SESSION_RESTORE_NODE_UNAVAILABLE: "+error.Message+"; using original update path"); }
+                    }
+                    Save(recovery,true);
                     log("SESSION_RECOVERY_SAVED file="+RecoveryPath+" original="+recovery.NvidiaInf);
                     bool mayRestore=true,unlocked=false;
                     try {
@@ -166,14 +178,15 @@ namespace CMP90HX {
                     } finally {
                         if(mayRestore) {
                             recovery.MayHaveDma=false; Save(recovery,false);
-                            Restore(recovery,log);
+                            Restore(recovery,log,direct);
                         }
                         else log("SESSION_RESTORE_BLOCKED: DMA state not confirmed safe; retain recovery file and reboot before session-restore");
                     }
+                    log("SESSION_DEVICE_READY: unlock and NVIDIA restore complete; observationSeconds="+observeSeconds);
                     DateTime end=DateTime.UtcNow.AddSeconds(observeSeconds);
                     while(DateTime.UtcNow<end) { Wait(id,"nvlddmkm",0,log); Thread.Sleep(5000); }
                     log("SESSION_UNLOCK_COMPLETE; verify retained unlock, power telemetry, workload and rendering responsiveness"); return 0;
-                } finally { if(acquired) mutex.ReleaseMutex(); }
+                } finally { if(direct!=null) direct.Dispose(); if(acquired) mutex.ReleaseMutex(); }
             }
         }
         // Internal post-load worker. Parent holds the workflow mutex and saved recovery first.

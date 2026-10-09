@@ -210,6 +210,8 @@ static BOOLEAN CoreReady(void)
 static int CoreSbr(void)
 {
     ULONG control, i, stable = 0, observed; LARGE_INTEGER interval;
+    ULONGLONG sbrBegin = KeQueryInterruptTime(), readyBegin, readyDeadline;
+    const ULONG settleMs = 250, pollMs = 50, stableNeeded = 3;
     if (!CoreBudget()) return -1;
     control = PciValue(BridgeBdf, 0x3e, 2) & ~0x400u;
     if (control > 65535 || (control & 0x40)) return -1;
@@ -232,12 +234,22 @@ static int CoreSbr(void)
     if (i == 46) return -1;
     for (i = 0; i < 6; ++i) if (!CorePciWrite(0x10 + i*4, 4, SavedBars[i])) return -1;
     if (!CorePciWrite(4, 2, SavedCommand)) return -1;
-    CoreDelay(250);
-    for (i = 0; i < 156; ++i) {
+    readyBegin = KeQueryInterruptTime();
+    readyDeadline = readyBegin + 8050ULL * 10000; // Same ~8 second recovery budget.
+    CoreDelay(settleMs);
+    // Three samples 50ms apart retain the verified minimum 100ms stable window.
+    // A slow bootstrap keeps polling; never release DMA based on elapsed time alone.
+    for (i = 0; KeQueryInterruptTime() < readyDeadline; ++i) {
         if (!CoreBudget()) return -1;
         stable = CoreReady() ? stable + 1 : 0;
-        if (stable == 3) { CorePciEvidence("after-sbr"); CoreLog(NULL, "FILTER_SBR_READY\n"); return 0; }
-        CoreDelay(50);
+        if (stable == stableNeeded) {
+            CorePciEvidence("after-sbr"); CoreLog(NULL, "FILTER_SBR_READY\n");
+            CoreLog(NULL, "FILTER_SBR_TIMING sbr=%u elapsedMs=%llu readyMs=%llu polls=%u settleMs=%u pollMs=%u stableSamples=%u\n",
+                ActiveCore->SbrCount, (KeQueryInterruptTime()-sbrBegin)/10000,
+                (KeQueryInterruptTime()-readyBegin)/10000, i+1, settleMs, pollMs, stableNeeded);
+            return 0;
+        }
+        CoreDelay(pollMs);
     }
     return -1;
 }
@@ -375,7 +387,7 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     ActiveCore = ctx; ctx->Deadline = begin + 120000ULL * 10000;
     ctx->Pdo = ext->Pdo; ObReferenceObject(ctx->Pdo);
     ctx->StageBegin = begin; ctx->StageNumber = 2;
-    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.2 budgetMs=120000 mode=%s\n",
+    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.5 budgetMs=120000 mode=%s\n",
 #ifdef CMP_UNLOCK_SESSION
         "session-post-start-ioctl"
 #else
