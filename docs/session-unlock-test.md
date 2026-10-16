@@ -1,11 +1,11 @@
-﻿# 0.6.5：临时功能驱动，START 完成后解锁
+# 0.6.5：临时功能驱动，START 完成后解锁
 
 本轮针对0.5.5用户反馈：解锁及NVIDIA接管正常，但渲染程序在解锁期间等待。
 新路径先完成NVIDIA停用，让系统有机会处理渲染切换，然后绑定临时PCI功能驱动。
 临时驱动的START不运行固件、不做SBR、不分配DMA；长操作只来自之后的独立IOCTL。
 因此可以验证长START窗口是否是等待原因。尚未证明渲染不再卡顿或所有应用会切到核显。
 
-输出固定为本项目 `build/filter-driver`，新增 `CMP90HXUnlockSession.sys/.inf/.cat`。
+输出固定为本项目 `build/session-driver`，新增 `CMP90HXUnlockSession.sys/.inf/.cat`。
 原Lower Filter路径保留作为对照。两种驱动有各自控制设备，调用者均限制为配套EXE。
 本轮新EXE摘要改变：测试session路径需要匹配新session SYS；继续测试filter路径也要更新其配套SYS。
 
@@ -23,13 +23,13 @@
 
 ## 签名和运行
 
-1. 运行项目根目录 `./build.ps1` 编译。构建不会加载、签名或操作显卡。
+1. 运行项目根目录 `./build.ps1` 编译正式 Session 包。构建不会加载、签名或操作显卡；旧 Lower Filter 仅在显式添加 `-IncludeLegacyFilter` 时编译。
 2. 签名 `CMP90HXUnlockSession.sys`。如果要测试旧Filter路径，另签 `CMP90HXLowerFilter.sys`。
 3. 在包目录重新生成CAT，然后签 `CMP90HXUnlockSession.cat`（旧路径另签对应CAT）。
 4. 保持显卡当前为 NVIDIA Code 0。更新过已加载的session SYS，需要重启加载新版本。
 
 ```powershell
-cd E:\code\90HX\90HXWindowsUnlock\90HXWinSessionUnlock\build\filter-driver
+cd E:\code\90HX\90HXWindowsUnlock\90HXWinSessionUnlock\build\session-driver
 & 'H:\Windows Kits\10\bin\10.0.28000.0\x86\Inf2Cat.exe' /driver:. /os:10_GE_X64 /uselocaltime
 # 按自己的签名流程签对应CAT，然后在管理员终端执行：
 .\CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 --observe-seconds 180 --log session-unlock-065.log

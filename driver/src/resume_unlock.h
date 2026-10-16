@@ -387,7 +387,7 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     ActiveCore = ctx; ctx->Deadline = begin + 120000ULL * 10000;
     ctx->Pdo = ext->Pdo; ObReferenceObject(ctx->Pdo);
     ctx->StageBegin = begin; ctx->StageNumber = 2;
-    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.5 budgetMs=120000 mode=%s\n",
+    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.7 budgetMs=120000 mode=%s\n",
 #ifdef CMP_UNLOCK_SESSION
         "session-post-start-ioctl"
 #else
@@ -437,6 +437,7 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     CoreStage(11);
     ret = pcie_find_first_closed_plm(g, &target);
     if (ret || ioread32((PUCHAR)GpuMapping+0x82381c) != 0x88888888 ||
+        !quadro_source_valid(ioread32((PUCHAR)GpuMapping+QUADRO_OFFSET)) ||
         ioread32((PUCHAR)GpuMapping+0x823820) != 8 || ioread32((PUCHAR)GpuMapping+0x823830) != 4 ||
         !(ioread32((PUCHAR)GpuMapping+0x8860c) & 1) || ctx->Fault || ctx->Live) {
         ret = -1; goto core_failed;

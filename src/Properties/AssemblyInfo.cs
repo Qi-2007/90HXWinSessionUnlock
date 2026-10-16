@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("CMP 90HX Filter Unlocker")]
-[assembly: AssemblyDescription("Standalone Lower Filter Unlock Worker")]
+[assembly: AssemblyTitle("CMP 90HX Session Unlock Worker")]
+[assembly: AssemblyDescription("CMP 90HX Session unlock backend worker")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Qi")]
-[assembly: AssemblyProduct("CMP 90HX Filter Unlocker")]
+[assembly: AssemblyProduct("CMP 90HX Windows Unlock")]
 [assembly: AssemblyCopyright("Copyright (C) 2026 Qi")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -29,5 +29,7 @@ using System.Runtime.InteropServices;
 //      生成号
 //      修订号
 //
-[assembly: AssemblyVersion("0.6.5.0")]
-[assembly: AssemblyFileVersion("0.6.5.0")]
+[assembly: AssemblyVersion("0.6.7.0")]
+[assembly: AssemblyFileVersion("0.6.7.0")]
+
+[assembly: AssemblyInformationalVersion("0.6.7.0")]

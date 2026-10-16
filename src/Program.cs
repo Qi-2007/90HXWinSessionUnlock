@@ -101,7 +101,7 @@ namespace CMP90HX {
             Console.WriteLine(line); if(logFile!=null) logFile.WriteLine(line);
         }
         static void Usage() {
-            Console.WriteLine("CMP90HX standalone Filter/session unlock worker 0.6.5");
+            Console.WriteLine("CMP 90HX Session Unlock Worker " + typeof(Program).Assembly.GetName().Version);
             Console.WriteLine("  CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 [--session-inf FILE] [--restore-mode update|direct] [--observe-seconds 180] [--log FILE] (temporary function driver; post-START IOCTL; restore original NVIDIA INF)");
             Console.WriteLine("  CMP90HXUnlocker.exe session-restore --bdf 02:00.0 [--log FILE] (resume saved NVIDIA recovery after safe DMA gate or reboot)");
             Console.WriteLine("  CMP90HXUnlocker.exe session-status --bdf 02:00.0 [--log FILE] (query temporary driver, no unlock)");

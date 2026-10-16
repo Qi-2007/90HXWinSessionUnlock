@@ -1,10 +1,9 @@
-; Experimental, exclusive PCI function driver. Not a NVIDIA upper/lower filter.
 [Version]
 Signature="$WINDOWS NT$"
 Class=System
 ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
 Provider=%Provider%
-DriverVer=10/08/2026,0.6.5.0
+DriverVer=10/16/2026,0.6.7.0
 CatalogFile=CMP90HXUnlockSession.cat
 PnpLockdown=1
 
@@ -51,6 +50,6 @@ CMP90HXUnlockSession.sys
 CMP90HXUnlockSession.sys=1
 
 [Strings]
-Provider="CMP90HX Experimental"
-Device="CMP 90HX Temporary Unlock Session"
-Disk="CMP90HX temporary session driver"
+Provider="Qi"
+Device="CMP 90HX Session Unlock Driver"
+Disk="CMP 90HX Windows Unlock"

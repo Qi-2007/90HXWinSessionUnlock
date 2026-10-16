@@ -343,6 +343,31 @@ namespace CMP90HX
                 Console.WriteLine("REBUILT_PRIMITIVE_DIFFERENTIAL_PASSED: real ELF radix/input allocations, failure injection, reverse release, full 4096-byte WPR metadata and memory decode.");
             } finally {foreach(IntPtr p in new IntPtr[]{input,boot,layout,ia,ib,ma,mb})Marshal.FreeHGlobal(p);}
         }
+        static void QuadroTests(byte[] rebuilt)
+        {
+            using(MockHardware b=new MockHardware()) using(CoreSession cb=Session(rebuilt,b)) {
+                b.WriteMmio(MockHardware.Bar+0x823804,uint.MaxValue);
+                uint rng=123456789;
+                for(int i=0;i<1000;i++) {
+                    rng=unchecked(rng*1664525u+1013904223u);
+                    if(rng==uint.MaxValue || (rng&0xffff0000)==0xbadf0000) continue;
+                    b.WriteMmio(MockHardware.Bar+0x823808,rng);
+                    Check(cb.Call("do_permissive_with_handoff",1,cb.Handoff,0)==0,"Quadro fast completion failed.");
+                    Check(b.ReadMmio(MockHardware.Bar+0x823808)==((rng&~0x03900bbbu)|0x03900888),"Quadro unrelated bits changed.");
+                }
+                Check(cb.HandoffCalls==0,"Quadro FEAT-open completion unexpectedly reset the GPU.");
+                b.WriteMmio(MockHardware.Bar+0x823808,0);b.IgnoreMmioWrites=true;
+                Check(cb.Call("do_permissive_with_handoff",1,cb.Handoff,0)==-4,"Quadro readback mismatch accepted.");
+                b.IgnoreMmioWrites=false;
+                foreach(uint bad in new uint[]{uint.MaxValue,0xbadf5620}) {
+                    b.WriteMmio(MockHardware.Bar+0x823808,bad);int writes=b.MmioWrites;
+                    Check(cb.Call("do_permissive_with_handoff",1,cb.Handoff,0)==-1001 && b.MmioWrites==writes,"Quadro inaccessible source was written.");
+                }
+            }
+            Console.WriteLine("REBUILT_QUADRO_ELF_TEST_PASSED: 1000 source RMW cases, readback failure, inaccessible source and no-SBR FEAT-open completion; actual ELF on mock hardware.");
+        }
+        internal static int RunQuadro(string candidatePath)
+        { QuadroTests(ElfCore.PinnedBytes(candidatePath)); return 0; }
         internal static int Run(string referencePath,string candidatePath)
         {
             byte[] original=ElfCore.PinnedBytes(referencePath), rebuilt=ElfCore.PinnedBytes(candidatePath);
@@ -450,6 +475,7 @@ namespace CMP90HX
                 }
                 using(MockHardware b=new MockHardware()) using(CoreSession cb=Session(rebuilt,b)) {
                     b.WriteMmio(MockHardware.Bar+0x823834,0); // Explicit readable graphics protection status.
+                    b.WriteMmio(MockHardware.Bar+0x823808,0x03900888);
                     int writes=b.MmioWrites;
                     Check(cb.Call("do_permissive_with_handoff",1,cb.Handoff,0)==0,"Compute skip failed.");
                     Check(cb.Call("do_permissive_with_handoff",2,cb.Handoff,0)==0,"Graphics skip failed.");
@@ -467,6 +493,7 @@ namespace CMP90HX
                     b.SetPci(MockHardware.Gpu,0,0xffffffff,4);
                     Check(cb.Call("pcie_find_first_closed_plm",(ulong)scratch.ToInt64(),0,0)==-1,"Lost device was accepted.");
                 }
+                QuadroTests(rebuilt);
                 Console.WriteLine("REBUILT_ELF_DIFFERENTIAL_TEST_PASSED: "+samples+" randomized reference/candidate policies, restore ABI, all PLM positions, skips and failure gates; actual ELF execution on mock hardware only.");
                 return 0;
             } finally { Marshal.FreeHGlobal(scratch); }

@@ -96,9 +96,26 @@ int ga102_booter_open_plm_with_handoff(gpu *g, u32 offset, const char *name,
     return identity(g) || *after!=0xffffffffu || rd(g,offset)!=0xffffffffu ? -1 : 0;
 }
 
+/* 4c32b72 EFI .text+11bc0: FEAT PLM exact-open, then masked RMW.
+ * READOUT 0x823814 is diagnostic; success proves source override only. */
+static int quadro_apply(gpu *g) {
+    u32 old, next, after;
+    if(identity(g)) return -1001;
+    if(rd(g,0x823804)!=0xffffffffu) return -2;
+    old=rd(g,QUADRO_OFFSET);
+    if(invalid(old)) return -1001;
+    next=(old&~QUADRO_MASK)|QUADRO_TARGET;
+    if(old!=next) wr(g,QUADRO_OFFSET,next);
+    after=rd(g,QUADRO_OFFSET);
+    if(g->log) g->log(g,"REBUILT_QUADRO_SOURCE old=%08x write=%08x after=%08x readout=%08x (diagnostic only)\n",
+                      old,next,after,rd(g,0x823814));
+    if(identity(g) || invalid(after)) return -1001;
+    return quadro_source_valid(after) ? 0 : -4;
+}
 static int feature_verify(gpu *g,u32 plm,const feature_write *plan,u32 count) {
     if (rd(g,plm)!=0xffffffffu) return -2;
     for(u32 i=0;i<count;i++) if(rd(g,plan[i].offset)!=plan[i].value) return -2;
+    if(plm==0x823804 && !quadro_source_valid(rd(g,QUADRO_OFFSET))) return -4;
     if(plm==0x823b04) {
         u32 raster=rd(g,0x823834);
         if(invalid(raster) || (raster&3)) return -2;
@@ -141,6 +158,7 @@ static int feature_transaction(gpu *g,u32 mode,handoff_fn handoff) {
     if(status) goto done;
     status=rebuilt_feature_stage(g,mode,plm,plan,count,label,&s,&after);
     if(status) goto done;
+    if(mode==1) {status=quadro_apply(g);if(status) goto done;}
     if(mode==2) { (void)rebuilt_gr_power(g);rebuilt_media_probe(g); }
     if(rebuilt_session_identity(g,&s) || feature_verify(g,plm,plan,count) ||
        rebuilt_session_identity(g,&s) || handoff(g) ||
@@ -160,8 +178,14 @@ int do_permissive_with_handoff(gpu *g, u32 mode, handoff_fn handoff) {
     if (mode==1) {
         first=rd(g,0x82381c); second=rd(g,0x823820);
         if (!invalid(first) && !invalid(second) && first==0x88888888u && second==8) {
-            if (g->log) g->log(g,"REBUILT_COMPUTE_ALREADY_ENABLED\n");
-            return identity(g);
+            u32 quadro=rd(g,QUADRO_OFFSET);
+            if(quadro_source_valid(quadro)) {
+                if (g->log) g->log(g,"REBUILT_COMPUTE_QUADRO_ALREADY_ENABLED\n");
+                return identity(g);
+            }
+            /* Complete a partial unlock without Booter or SBR only if the
+             * FEAT protection gate is already exactly open. */
+            if(rd(g,0x823804)==0xffffffffu) return quadro_apply(g);
         }
     } else {
         first=rd(g,0x823830); second=rd(g,0x823834);
@@ -174,7 +198,8 @@ int do_permissive_with_handoff(gpu *g, u32 mode, handoff_fn handoff) {
     if (status) return status;
     if (identity(g)) return -1;
     if (mode==1)
-        return rd(g,0x82381c)==0x88888888u && rd(g,0x823820)==8 ? 0 : -1;
+        return rd(g,0x82381c)==0x88888888u && rd(g,0x823820)==8 &&
+            quadro_source_valid(rd(g,QUADRO_OFFSET)) ? 0 : -1;
     first=rd(g,0x823830); second=rd(g,0x823834);
     return first==4 && !invalid(second) && !(second&3) ? 0 : -1;
 }

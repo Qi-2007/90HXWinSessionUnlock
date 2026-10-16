@@ -8,6 +8,13 @@
 typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned short u16;
+#define QUADRO_OFFSET 0x823808u
+#define QUADRO_MASK 0x03900bbbu
+#define QUADRO_TARGET 0x03900888u
+static inline int quadro_source_valid(u32 v) {
+    return v!=0xffffffffu && (v&0xffff0000u)!=0xbadf0000u &&
+        (v&QUADRO_MASK)==QUADRO_TARGET;
+}
 typedef struct gpu gpu;
 typedef int (*handoff_fn)(gpu *);
 struct gpu {

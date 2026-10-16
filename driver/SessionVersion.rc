@@ -1,22 +1,25 @@
-﻿#include <winver.h>
+#include <winver.h>
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,6,5,0
-PRODUCTVERSION 0,6,5,0
+FILEVERSION 0,6,7,0
+PRODUCTVERSION 0,6,7,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_DRV
-FILESUBTYPE 0
+FILESUBTYPE VFT2_DRV_SYSTEM
 BEGIN
  BLOCK "StringFileInfo"
  BEGIN
   BLOCK "040904b0"
   BEGIN
-   VALUE "FileDescription", "CMP90HX Temporary Session Unlock Driver"
-   VALUE "FileVersion", "0.6.5.0"
+   VALUE "CompanyName", "Qi"
+   VALUE "FileDescription", "CMP 90HX Session Unlock Driver"
+   VALUE "FileVersion", "0.6.7.0"
    VALUE "InternalName", "CMP90HXUnlockSession"
+   VALUE "LegalCopyright", "Copyright (C) 2026 Qi"
    VALUE "OriginalFilename", "CMP90HXUnlockSession.sys"
-   VALUE "ProductName", "CMP90HX Windows Filter Driver Unlock"
+   VALUE "ProductName", "CMP 90HX Windows Unlock"
+   VALUE "ProductVersion", "0.6.7.0"
   END
  END
  BLOCK "VarFileInfo"

@@ -49,11 +49,11 @@ GPU 固件没有在模拟器执行，离线测试不能替代实机解锁。证�
 
 仅重编译发布核心、不运行原对象对照时用 -SourceOnly，摘要写入 manifest-source-only.json。参考对照仍需要原对象和 Capstone。
 
-独立 v5 包在 build/rebuilt-core/dma-driver-v5.1/：CMP90HXDma.sys、匹配的 CMP90HXUnlocker.exe、配置、核心和清单。新 worker 摘要已固定到新驱动，因此 SYS 需要重新签名。签名后构建 GUI：
+独立 v5 包在 build/rebuilt-core/dma-driver-v5.1/：CMP90HXUnlockNative.sys、匹配的 CMP90HXUnlocker.exe、配置、核心和清单。新 worker 摘要已固定到新驱动，因此 SYS 需要重新签名。签名后构建 GUI：
 
 ```powershell
 .\tools\build-rebuilt-gui.ps1 -InputDirectory "$PWD\build\rebuilt-core\dma-driver-v5.1" `
-  -DriverPath "$PWD\build\rebuilt-core\dma-driver-v5.1\CMP90HXDma.sys" `
+  -DriverPath "$PWD\build\rebuilt-core\dma-driver-v5.1\CMP90HXUnlockNative.sys" `
   -OutputDirectory "$PWD\build\rebuilt-core\gui-v5.1"
 ```
 

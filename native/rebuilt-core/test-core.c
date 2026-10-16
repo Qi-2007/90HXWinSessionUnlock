@@ -5,7 +5,7 @@
 typedef struct { u32 offset,value; } reg;
 static reg regs[40];
 static int nr, writes, pci_calls, disappear, ignore_writes, backend_calls, handed, backend_error;
-static int delayed, scrub_pending;
+static int delayed, scrub_pending, lose_quadro_on_handoff;
 static reg trace[16];
 static int cleanups, cleanup_recovery, cleanup_retained, stage_failure, fwsec_failure, identity_failure, handoff_failure;
 static int identity_calls, fail_identity_at, corrupt_target, cleanup_handoff, fwsec_calls;
@@ -31,17 +31,18 @@ static int pci(gpu *g,u32 offset,u32 *value) {
     *value=disappear && pci_calls>1 ? 0xffffffffu : 0x220d10deu;
     return 0;
 }
-static int handoff(gpu *g) { (void)g;handed++;return handoff_failure; }
+static int handoff(gpu *g) { (void)g;handed++;if(lose_quadro_on_handoff)set(QUADRO_OFFSET,0);return handoff_failure; }
 static void delay(u64 ms) { delayed+=(int)ms; }
 static gpu device;
 static void reset(void) {
     memset(&device,0,sizeof(device));device.bar0=0x100000000ull;device.device_id=0x220d;device.pci_read=pci;
     nr=writes=pci_calls=disappear=ignore_writes=backend_calls=handed=backend_error=0;
-    delayed=scrub_pending=0;device.delay_ms=delay;
+    delayed=scrub_pending=lose_quadro_on_handoff=0;device.delay_ms=delay;
     cleanups=cleanup_recovery=cleanup_retained=stage_failure=fwsec_failure=identity_failure=handoff_failure=0;
     identity_calls=fail_identity_at=corrupt_target=cleanup_handoff=fwsec_calls=0;
     set(0,0x17200000);set(0x82381c,0x88888888);set(0x823820,8);set(0x823830,4);set(0x823834,0);
     set(0x8860c,1);
+    set(QUADRO_OFFSET,QUADRO_TARGET);
     for(int i=0;i<9;i++) set(offsets[i],0xffffffffu);
 }
 /* Firmware stubs verify source routing only, not actual firmware execution. */
@@ -84,6 +85,26 @@ int main(void) {
     CHECK(!do_permissive_with_handoff(&device,1,handoff));
     CHECK(!do_permissive_with_handoff(&device,2,handoff));
     CHECK(!backend_calls && !handed && !writes);
+    reset();set(QUADRO_OFFSET,0x00100283);set(0x823804,0xffffffffu);
+    CHECK(!do_permissive_with_handoff(&device,1,handoff) && !backend_calls && !handed);
+    CHECK(ioread32((void *)(device.bar0+QUADRO_OFFSET))==QUADRO_TARGET && writes==1);
+    CHECK(!do_permissive_with_handoff(&device,1,handoff) && writes==1);
+    reset();set(QUADRO_OFFSET,0x00100283);set(0x823804,0xffffffcfu);
+    CHECK(!do_permissive_with_handoff(&device,1,handoff) && backend_calls==1 && handed==1);
+    reset();set(QUADRO_OFFSET,0);set(0x823804,0xffffffffu);ignore_writes=1;
+    CHECK(do_permissive_with_handoff(&device,1,handoff)==-4 && !handed);
+    u32 bad_quadro[]={0xffffffffu,0xbadf5620u};
+    for(int i=0;i<2;i++) {
+        reset();set(QUADRO_OFFSET,bad_quadro[i]);set(0x823804,0xffffffffu);
+        CHECK(do_permissive_with_handoff(&device,1,handoff)==-1001 && !writes && !backend_calls);
+    }
+    for(int trial=0;trial<1000;trial++) {
+        reset();u32 old=(u32)trial*1664525u+1013904223u;
+        if(old==0xffffffffu || (old&0xffff0000u)==0xbadf0000u) continue;
+        set(QUADRO_OFFSET,old);set(0x823804,0xffffffffu);
+        CHECK(!do_permissive_with_handoff(&device,1,handoff));
+        CHECK(ioread32((void *)(device.bar0+QUADRO_OFFSET))==((old&~QUADRO_MASK)|QUADRO_TARGET));
+    }
     for(u32 mode=1;mode<=2;mode++) {
         reset();set(mode==1?0x82381c:0x823830,0);
         CHECK(!do_permissive_with_handoff(&device,mode,handoff));
@@ -107,7 +128,9 @@ int main(void) {
         CHECK(handed==(failed>=4?1:0) && !cleanup_handoff);
     }
     reset();set(0x82381c,0);corrupt_target=1;
-    CHECK(do_permissive_with_handoff(&device,1,handoff)==-1001 && !handed && cleanup_retained && cleanup_recovery);
+    CHECK(do_permissive_with_handoff(&device,1,handoff)==-2 && !handed && cleanup_retained && cleanup_recovery);
+    reset();set(0x82381c,0);lose_quadro_on_handoff=1;
+    CHECK(do_permissive_with_handoff(&device,1,handoff)==-1001 && handed==1 && cleanup_retained && cleanup_recovery);
     reset();set(0x82381c,0);set(0x600,0xffffffffu);set(0x200,0x2002);
     CHECK(!do_permissive_with_handoff(&device,1,handoff) && fwsec_calls==1 && backend_calls==1 && handed==1);
     reset();set(0x82381c,0);set(0x600,0xbadf5620u);set(0x200,0x2002);
