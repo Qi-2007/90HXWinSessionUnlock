@@ -333,28 +333,72 @@ static NTSTATUS CoreAllocateArena(FILTER_EXTENSION *ext)
         ActiveCore->Logical.QuadPart, MmGetPhysicalAddress(ActiveCore->Buffer).QuadPart, CMP_ARENA_BYTES);
     return STATUS_SUCCESS;
 }
+/* Bounded, read-only evidence around the existing retrain sequence. Keep this
+ * small: the complete firmware trace shares a fixed 32 KiB result buffer. */
+static VOID CoreGen2Evidence(const char *phase)
+{
+    ULONG side, bdf, cap;
+    for (side = 0; side < 2; ++side) {
+        bdf = side ? BridgeBdf : GpuBdf; cap = side ? BridgeCap : GpuCap;
+        CoreLog(NULL, "FILTER_GEN2_REG phase=%s side=%s bdf=0x%04x cap=0x%02x flags=0x%04x linkCap=0x%08x linkCap2=0x%08x ctl=0x%04x status=0x%04x ctl2=0x%04x status2=0x%04x\n",
+            phase, side ? "bridge" : "gpu", bdf, cap,
+            PciValue(bdf, cap+2, 2), PciValue(bdf, cap+0x0c, 4), PciValue(bdf, cap+0x2c, 4),
+            PciValue(bdf, cap+0x10, 2), PciValue(bdf, cap+0x12, 2),
+            PciValue(bdf, cap+0x30, 2), PciValue(bdf, cap+0x32, 2));
+    }
+}
+static BOOLEAN CoreGen2Result(const char *reason, BOOLEAN success, ULONGLONG begin)
+{
+    CoreGen2Evidence("end");
+    CoreLog(NULL, "FILTER_GEN2_END success=%u reason=%s elapsedMs=%llu\n",
+        (ULONG)success, reason, (KeQueryInterruptTime()-begin)/10000);
+    return success;
+}
 static BOOLEAN CoreGen2(void)
 {
-    ULONG ctl, i, stable = 0, g, r;
+    ULONG ctl, i, attempt, stable, g, r;
+    ULONGLONG begin = KeQueryInterruptTime();
+    CoreLog(NULL, "FILTER_GEN2_BEGIN diag=1 attempts=3 requiredGpuWidth=%u requiredBridgeWidth=%u polls=50 pollMs=100 stableNeeded=3\n",
+        ActiveCore->GpuWidth, ActiveCore->BridgeWidth);
+    CoreGen2Evidence("before");
     if ((PciValue(GpuBdf, GpuCap + 2, 2) & 15) < 2 ||
         (PciValue(BridgeBdf, BridgeCap + 2, 2) & 15) < 2 ||
-        !(PciValue(GpuBdf, GpuCap + 0x2c, 4) & 2)) return FALSE;
+        !(PciValue(GpuBdf, GpuCap + 0x2c, 4) & 2))
+        return CoreGen2Result("capability", FALSE, begin);
     ctl = PciValue(GpuBdf, GpuCap + 0x30, 2);
-    if (!CorePciWrite(GpuCap + 0x30, 2, (ctl & ~15u) | 2)) return FALSE;
+    if (!CorePciWrite(GpuCap + 0x30, 2, (ctl & ~15u) | 2))
+        return CoreGen2Result("gpu-target-write", FALSE, begin);
     ctl = PciValue(BridgeBdf, BridgeCap + 0x30, 2);
-    if (!NT_SUCCESS(BridgeWord(BridgeCap + 0x30, (ctl & ~15u) | 2))) return FALSE;
+    if (!NT_SUCCESS(BridgeWord(BridgeCap + 0x30, (ctl & ~15u) | 2)))
+        return CoreGen2Result("bridge-target-write", FALSE, begin);
     ctl = PciValue(GpuBdf, GpuCap + 0x10, 2);
-    if (!CorePciWrite(GpuCap + 0x10, 2, ctl & ~3u)) return FALSE;
-    ctl = PciValue(BridgeBdf, BridgeCap + 0x10, 2);
-    if ((ctl & 0x10) || !NT_SUCCESS(BridgeWord(BridgeCap + 0x10, (ctl & ~3u) | 0x20))) return FALSE;
-    for (i = 0; i < 50; ++i) {
-        CoreDelay(100); if (!CoreBudget()) return FALSE;
-        g = PciValue(GpuBdf, GpuCap + 0x12, 2); r = PciValue(BridgeBdf, BridgeCap + 0x12, 2);
-        stable = (g & 15) == 2 && (r & 15) == 2 && !((g | r) & 0x800) &&
-            ((g >> 4) & 63) >= ActiveCore->GpuWidth && ((r >> 4) & 63) >= ActiveCore->BridgeWidth ? stable+1 : 0;
-        if (stable == 3) return TRUE;
+    if (!CorePciWrite(GpuCap + 0x10, 2, ctl & ~3u))
+        return CoreGen2Result("gpu-link-control-write", FALSE, begin);
+    /* Native succeeded on this platform only after its second request.
+     * Match its bounded three-attempt policy; never retry the full unlock. */
+    for (attempt = 0; attempt < 3; ++attempt) {
+        if (!CoreBudget()) return CoreGen2Result("budget-or-fault", FALSE, begin);
+        ctl = PciValue(BridgeBdf, BridgeCap + 0x10, 2);
+        if (ctl & 0x10) return CoreGen2Result("bridge-link-disabled", FALSE, begin);
+        if (!NT_SUCCESS(BridgeWord(BridgeCap + 0x10, (ctl & ~3u) | 0x20)))
+            return CoreGen2Result("bridge-retrain-write", FALSE, begin);
+        CoreLog(NULL, "FILTER_GEN2_ATTEMPT attempt=%u maxAttempts=3\n", attempt+1);
+        CoreGen2Evidence("requested");
+        stable = 0;
+        for (i = 0; i < 50; ++i) {
+            CoreDelay(100);
+            if (!CoreBudget()) return CoreGen2Result("budget-or-fault", FALSE, begin);
+            g = PciValue(GpuBdf, GpuCap + 0x12, 2); r = PciValue(BridgeBdf, BridgeCap + 0x12, 2);
+            stable = (g & 15) == 2 && (r & 15) == 2 && !((g | r) & 0x800) &&
+                ((g >> 4) & 63) >= ActiveCore->GpuWidth && ((r >> 4) & 63) >= ActiveCore->BridgeWidth ? stable+1 : 0;
+            if (i == 0 || (i+1) % 10 == 0 || stable == 3)
+                CoreLog(NULL, "FILTER_GEN2_POLL attempt=%u poll=%u elapsedMs=%llu gpuLink=0x%04x bridgeLink=0x%04x stable=%u\n",
+                    attempt+1, i+1, (KeQueryInterruptTime()-begin)/10000, g, r, stable);
+            if (stable == 3) return CoreGen2Result("ready", TRUE, begin);
+        }
+        CoreLog(NULL, "FILTER_GEN2_ATTEMPT_TIMEOUT attempt=%u\n", attempt+1);
     }
-    return FALSE;
+    return CoreGen2Result("link-not-stable-gen2", FALSE, begin);
 }
 static BOOLEAN CoreCanReleaseForPnp(void)
 {
@@ -387,7 +431,11 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     ActiveCore = ctx; ctx->Deadline = begin + 120000ULL * 10000;
     ctx->Pdo = ext->Pdo; ObReferenceObject(ctx->Pdo);
     ctx->StageBegin = begin; ctx->StageNumber = 2;
+#ifdef CMP_UNLOCK_SESSION
+    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.8 budgetMs=120000 mode=%s\n",
+#else
     CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.7 budgetMs=120000 mode=%s\n",
+#endif
 #ifdef CMP_UNLOCK_SESSION
         "session-post-start-ioctl"
 #else
