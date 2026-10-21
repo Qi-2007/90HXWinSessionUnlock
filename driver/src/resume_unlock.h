@@ -1,4 +1,4 @@
-﻿/* Source core runs synchronously at PASSIVE before D0 completion goes upward.
+/* Source core runs synchronously at PASSIVE before D0 completion goes upward.
  * This does not establish a cold initialization or WDDM exclusive-access window.
  * Addresses are derived from the bound PDO/resources, never from userspace.
  * One transaction at a time; no user-mode callback, ELF loader or code injection. */
@@ -207,6 +207,35 @@ static BOOLEAN CoreReady(void)
     return !InvalidWord(boot) && (boot & 1) && !InvalidWord(progress) &&
         (progress & 255) == 255 && !InvalidWord(memory) && (memory & 0x3f0);
 }
+static VOID CoreSbrConfigEvidence(const char *phase, ULONGLONG begin, ULONG polls)
+{
+    CoreLog(NULL, "FILTER_SBR_CONFIG phase=%s sbr=%u elapsedMs=%llu polls=%u gpuId=0x%08x gpuCommand=0x%08x gpuLink=0x%08x bridgeLink=0x%08x bridgeControl=0x%08x buses=0x%08x\n",
+        phase, ActiveCore->SbrCount, (KeQueryInterruptTime()-begin)/10000, polls,
+        PciValue(GpuBdf, 0, 4), PciValue(GpuBdf, 4, 2), PciValue(GpuBdf, GpuCap+0x12, 2),
+        PciValue(BridgeBdf, BridgeCap+0x12, 2), PciValue(BridgeBdf, 0x3e, 2), PciValue(BridgeBdf, 0x18, 4));
+}
+static BOOLEAN CoreWaitSbrConfig(void)
+{
+    ULONGLONG begin = KeQueryInterruptTime(), deadline = begin + 8000ULL * 10000, nextLog = begin;
+    ULONG polls = 0;
+    CoreDelay(100);
+    for (;;) {
+        if (!CoreBudget()) { CoreSbrConfigEvidence("budget-or-fault", begin, polls); return FALSE; }
+        ++polls;
+        if (PciValue(GpuBdf, 0, 4) == 0x220d10de && CoreLinkReady(GpuBdf, GpuCap) &&
+            CoreLinkReady(BridgeBdf, BridgeCap)) {
+            CoreSbrConfigEvidence("ready", begin, polls); return TRUE;
+        }
+        if (KeQueryInterruptTime() >= nextLog) {
+            CoreSbrConfigEvidence("pending", begin, polls);
+            nextLog = KeQueryInterruptTime() + 1000ULL * 10000;
+        }
+        if (KeQueryInterruptTime() >= deadline) {
+            CoreSbrConfigEvidence("timeout", begin, polls); return FALSE;
+        }
+        CoreDelay(20);
+    }
+}
 static int CoreSbr(void)
 {
     ULONG control, i, stable = 0, observed; LARGE_INTEGER interval;
@@ -224,14 +253,7 @@ static int CoreSbr(void)
     if (!NT_SUCCESS(BridgeWord(0x3e, control & ~0x40u)) ||
         PciValue(BridgeBdf, 0x3e, 2) != (control & ~0x40u)) return -1;
     if (observed != (control | 0x40)) return -1;
-    CoreDelay(100);
-    for (i = 0; i < 46; ++i) {
-        if (!CoreBudget()) return -1;
-        if (PciValue(GpuBdf, 0, 4) == 0x220d10de && CoreLinkReady(GpuBdf, GpuCap) &&
-            CoreLinkReady(BridgeBdf, BridgeCap)) break;
-        CoreDelay(20);
-    }
-    if (i == 46) return -1;
+    if (!CoreWaitSbrConfig()) return -1;
     for (i = 0; i < 6; ++i) if (!CorePciWrite(0x10 + i*4, 4, SavedBars[i])) return -1;
     if (!CorePciWrite(4, 2, SavedCommand)) return -1;
     readyBegin = KeQueryInterruptTime();
@@ -432,7 +454,7 @@ static NTSTATUS ResumeUnlock(FILTER_EXTENSION *ext, BOOLEAN sbrOnly, BOOLEAN sta
     ctx->Pdo = ext->Pdo; ObReferenceObject(ctx->Pdo);
     ctx->StageBegin = begin; ctx->StageNumber = 2;
 #ifdef CMP_UNLOCK_SESSION
-    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.8 budgetMs=120000 mode=%s\n",
+    CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.10 budgetMs=120000 mode=%s\n",
 #else
     CoreLog(NULL, "FILTER_SOURCE_CORE=v5.1 native-Win64 filter=0.6.7 budgetMs=120000 mode=%s\n",
 #endif

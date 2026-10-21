@@ -1,7 +1,7 @@
 #include <winver.h>
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,6,8,0
-PRODUCTVERSION 0,6,8,0
+FILEVERSION 0,6,10,0
+PRODUCTVERSION 0,6,10,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0
 FILEOS VOS_NT_WINDOWS32
@@ -14,12 +14,12 @@ BEGIN
   BEGIN
    VALUE "CompanyName", "Qi"
    VALUE "FileDescription", "CMP 90HX Session Unlock Driver"
-   VALUE "FileVersion", "0.6.8.0"
+   VALUE "FileVersion", "0.6.10.0"
    VALUE "InternalName", "CMP90HXUnlockSession"
    VALUE "LegalCopyright", "Copyright (C) 2026 Qi"
    VALUE "OriginalFilename", "CMP90HXUnlockSession.sys"
    VALUE "ProductName", "CMP 90HX Windows Unlock"
-   VALUE "ProductVersion", "0.6.8.0"
+   VALUE "ProductVersion", "0.6.10.0"
   END
  END
  BLOCK "VarFileInfo"

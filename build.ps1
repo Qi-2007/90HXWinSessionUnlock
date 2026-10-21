@@ -50,7 +50,8 @@ New-Item -ItemType Directory -Path $catalog | Out-Null
 foreach($flavor in $flavors) {
     Copy-Item -LiteralPath (Join-Path $out "$flavor.sys"),(Join-Path $out "$flavor.inf") -Destination $catalog
 }
-& (Join-Path $kit "bin\$SdkVersion\x86\Inf2Cat.exe") "/driver:$catalog" /os:10_GE_X64 /uselocaltime
+# VB covers Windows 10 2004 through 22H2; retain Windows 11 targets as well.
+& (Join-Path $kit "bin\$SdkVersion\x86\Inf2Cat.exe") "/driver:$catalog" /os:10_VB_X64,10_CO_X64,10_NI_X64,10_GE_X64 /uselocaltime
 if($LASTEXITCODE -ne 0) { throw 'Catalog generation failed.' }
 foreach($flavor in $flavors) { Copy-Item -LiteralPath (Join-Path $catalog "$flavor.cat") -Destination $out -Force }
 $artifacts=@($flavors | ForEach-Object { Join-Path $out "$_.sys" }); $artifacts+=Join-Path $out 'CMP90HXUnlocker.exe'

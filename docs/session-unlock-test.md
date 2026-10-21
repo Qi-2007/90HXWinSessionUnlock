@@ -1,4 +1,26 @@
-# 0.6.8：临时功能驱动，START 完成后解锁
+# 0.6.10：临时功能驱动，START 完成后解锁
+
+0.6.10：针对 ERYING Polestar Z590 MATX D4 / i9-11980HK / Windows 10 22H2 的首次 SBR 后
+配置空间不可读日志，将 Session 的配置/链路恢复等待改为 8 秒实际时钟上限，仍受 120 秒总预算约束。
+正常快速恢复时立即继续，不增加 SBR 次数；每约 1 秒记录 FILTER_SBR_CONFIG 的 GPU ID、
+Command、两端 Link Status、桥控制与总线号。超时前不恢复 BAR，不以等待时间代替身份和链路校验。
+此调整仅用于区分慢恢复和持续不可访问，不保证该平台解锁成功；保留 DMA 隔离和重启恢复要求。
+worker、Session SYS 与 INF 统一为 0.6.10.0。
+
+0.6.9：将正式 Session INF 的最低系统构建号从 22000 降为 19041，允许 Windows 10 2004 x64 及以后版本
+参与设备驱动匹配。worker、Session SYS 和 INF 统一为 0.6.9.0，DriverVer 为 2026-10-19；
+目录生成同时覆盖 Windows 10 VB 和 Windows 11 CO/NI/GE 系列。
+这是安装适用范围调整，不代表 Windows 10 实机兼容性已经通过验证。
+保留服务级 DmaRemappingCompatible=1 供旧系统使用，以及新版系统使用的设备级重映射配置；
+不关闭内核 DMA 保护，不放宽 DMA 所有权与隔离检查。驱动导入的 ExAllocatePool2 从 Windows 10 2004 起可用，
+因此不再继续降低驱动最低构建号。Session worker 同步改为目标 .NET Framework 4.8，
+避免 4.8.1 的系统要求抬高独立 Session 配套包的门槛。
+Console、Native 和读取组件有各自的框架要求，本次未调整；独立 Session 包的最低门槛
+不等于完整 Console 发行包已在所有这些系统上通过兼容验证。
+需重新签名 SYS、重新生成并签署 CAT，再用完整配套包更新 Console 后测试。
+
+参考：[ExAllocatePool2 最低系统版本](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-exallocatepool2)、
+[DMA 重映射配置](https://learn.microsoft.com/en-us/windows-hardware/drivers/pci/enabling-dma-remapping-for-device-drivers)。
 
 0.6.8：针对客户机 Native 第二次重训练才成功、Session 第一次等待后即失败的日志，
 Session 的 Gen2 重训练改为最多 3 次，每次最多 50 次 100ms 轮询并重新统计连续 3 次稳定样本。
@@ -37,7 +59,7 @@ worker、Session SYS 和 INF 统一为 0.6.8.0；更新后需使用完整配套�
 
 ```powershell
 cd E:\code\90HX\90HXWindowsUnlock\90HXWinSessionUnlock\build\session-driver
-& 'H:\Windows Kits\10\bin\10.0.28000.0\x86\Inf2Cat.exe' /driver:. /os:10_GE_X64 /uselocaltime
+& 'H:\Windows Kits\10\bin\10.0.28000.0\x86\Inf2Cat.exe' /driver:. /os:10_VB_X64,10_CO_X64,10_NI_X64,10_GE_X64 /uselocaltime
 # 按自己的签名流程签对应CAT，然后在管理员终端执行：
 .\CMP90HXUnlocker.exe session-unlock --bdf 02:00.0 --observe-seconds 180 --log session-unlock-065.log
 ```

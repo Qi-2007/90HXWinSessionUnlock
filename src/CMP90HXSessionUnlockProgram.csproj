@@ -6,7 +6,7 @@
     <ProjectGuid>{A04E2C3D-34C4-4D56-BDE4-86D3CA4B0AFE}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AssemblyName>CMP90HXUnlocker</AssemblyName>
-    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <PlatformTarget>x64</PlatformTarget>
     <OutputPath>..\build\</OutputPath>
     <IntermediateOutputPath>..\build\csharp-obj\</IntermediateOutputPath>

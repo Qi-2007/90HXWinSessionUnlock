@@ -8,7 +8,11 @@ $source=[IO.File]::ReadAllText((Join-Path $root 'driver\src\resume_unlock.h'))
 $start=$source.IndexOf('static VOID CoreGen2Evidence(')
 $end=$source.IndexOf('static BOOLEAN CoreCanReleaseForPnp(', $start)
 if($start -lt 0 -or $end -le $start) { throw 'Cannot locate driver Gen2 functions.' }
-[IO.File]::WriteAllText((Join-Path $out 'gen2-under-test.h'),$source.Substring($start,$end-$start),[Text.Encoding]::ASCII)
+$configStart=$source.IndexOf('static VOID CoreSbrConfigEvidence(')
+$configEnd=$source.IndexOf('static int CoreSbr(', $configStart)
+if($configStart -lt 0 -or $configEnd -le $configStart) { throw 'Cannot locate SBR config wait functions.' }
+$underTest=$source.Substring($configStart,$configEnd-$configStart)+$source.Substring($start,$end-$start)
+[IO.File]::WriteAllText((Join-Path $out 'gen2-under-test.h'),$underTest,[Text.Encoding]::ASCII)
 if(!(Test-Path -LiteralPath $VcVars)) { throw "Missing VS environment script: $VcVars" }
 $test=Join-Path $PSScriptRoot 'SessionGen2Tests.c'
 # One cmd environment owns both VS setup and compilation. No hardware access.
